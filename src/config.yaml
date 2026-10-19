@@ -1,7 +1,15 @@
 file_path: './data/mini_project_2_data.csv'
 target_column: no_show
-val_test_size: 0.2
-val_size: 0.5
+random_state: 42          # single seed used for splits and models
+val_test_size: 0.2        # fraction of data held out for validation + test
+val_size: 0.5             # fraction of the held-out data that becomes the TEST set (0.5 -> 80/10/10 split)
+class_weight: balanced    # imbalance strategy for models that support it ('balanced' or null to disable)
+artifacts_dir: './artifacts'      # model, metrics, threshold, config snapshot and plots are saved here (remove to disable)
+log_file: './logs/pipeline.log'   # log file written alongside console logging (remove to disable)
+# Optional business costs (e.g. cost of an empty room vs. cost of turning away a guest).
+# If both are set, the decision threshold minimises total cost on the validation set instead of maximising F1.
+# cost_false_negative: 5
+# cost_false_positive: 1
 logreg_param_grid:
   classifier__C: [0.001, 0.01, 0.1, 1.0, 10, 100, 1000]
   classifier__penalty: ['l2', None]
@@ -13,7 +21,7 @@ dt_param_grid:
   classifier__min_samples_split: [2, 5, 10]
   classifier__min_samples_leaf: [1, 2, 4]
 cv: 5
-scoring: accuracy
+scoring: roc_auc          # accuracy is misleading on an imbalanced target
 numerical_features:
   - price
   - days_stayed

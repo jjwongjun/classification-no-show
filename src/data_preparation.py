@@ -1,6 +1,5 @@
 # Standard library imports
 import logging
-import re
 from typing import Any, Dict, Optional
 
 # Related third-party imports
@@ -13,7 +12,7 @@ from sklearn.impute import SimpleImputer
 
 class DataPreparation:
     """
-    A class used to clean and preprocess HDB resale prices data.
+    A class used to clean and preprocess hotel booking data for no-show prediction.
 
     Attributes:
     -----------
@@ -22,6 +21,13 @@ class DataPreparation:
     preprocessor : sklearn.compose.ColumnTransformer
         A preprocessor pipeline for transforming numerical, nominal, and ordinal features.
     """
+
+    # Columns that must be present in the raw data before cleaning starts
+    REQUIRED_COLUMNS = [
+        "booking_id", "no_show", "branch", "booking_month", "arrival_month",
+        "arrival_day", "checkout_month", "checkout_day", "country", "first_time",
+        "room", "price", "platform", "num_adults", "num_children",
+    ]
 
     def __init__(self, config: Dict[str, Any]):
         """
@@ -47,17 +53,38 @@ class DataPreparation:
         pd.DataFrame: The cleaned DataFrame.
         """
         logging.info("Starting data cleaning.")
-        df.drop_duplicates(inplace=True)
+        self._validate_schema(df)
+        df = df.drop_duplicates().copy()  # work on a copy so the caller's DataFrame is not mutated
         df['currency'] = df['price'].str.extract(r'^(\D+)')[0].str.strip()
         df['price'] = df['price'].apply(self._convert_to_sgd)
         df = df.dropna(subset=['no_show'])
         df['num_adults'] = df['num_adults'].replace({'one': '1', 'two': '2'}).astype(int)
-        df['arrival_month'] = df['arrival_month'].str.title()
+        df['arrival_month'] = df['arrival_month'].str.strip().str.title()
+        df['booking_month'] = df['booking_month'].str.strip().str.title()  # same casing issue as arrival_month
         df['lead_time_months'] = df.apply(self._months_before_arrival, axis=1).astype('Int64')
         df['days_stayed'] = df.apply(self._days_stayed, axis=1).astype('Int64')
-        df.drop(columns=['booking_id', 'booking_month', 'arrival_day', 'checkout_month', 'checkout_day', 'currency'], inplace=True)
-        logging.info("Data cleaning completed.")
+        df = df.drop(columns=['booking_id', 'booking_month', 'arrival_day', 'checkout_month', 'checkout_day', 'currency'])
+        logging.info(f"Data cleaning completed. Cleaned data has {df.shape[0]} rows and {df.shape[1]} columns.")
         return df
+
+    def _validate_schema(self, df: pd.DataFrame) -> None:
+        """
+        Checks that the raw data has the columns and target values the pipeline relies on.
+
+        Args:
+        -----
+        df (pd.DataFrame): The raw input DataFrame.
+
+        Raises:
+        -------
+        ValueError: If required columns are missing or the target contains values other than 0 and 1.
+        """
+        missing = [col for col in self.REQUIRED_COLUMNS if col not in df.columns]
+        if missing:
+            raise ValueError(f"Input data is missing required columns: {missing}")
+        invalid_target = set(df["no_show"].dropna().unique()) - {0, 1}
+        if invalid_target:
+            raise ValueError(f"Target 'no_show' must be 0 or 1, found: {sorted(invalid_target)}")
 
     def _create_preprocessor(self) -> ColumnTransformer:
         """
@@ -102,6 +129,7 @@ class DataPreparation:
                 ("pass", "passthrough", self.config["passthrough_features"]),
             ],
             remainder="passthrough",
+            sparse_threshold=0,  # always return a dense array so every model type can consume it
             n_jobs=-1,
         )
         return preprocessor
@@ -121,12 +149,17 @@ class DataPreparation:
                 and 'arrival_month', each a full month name such as 'January'.
 
         Returns:
-            Optional[int]: The number of months (0 to 11) between booking and arrival, or None
+            Optional[int]: The number of months (0 to 11) between booking and arrival, or pd.NA
                 if either month is missing or not a recognised month name.
 
         Example:
-            months_before_arrival(row) -> 7
-            (where row['booking_month'] = 'November' and row['arrival_month'] = 'June')
+            >>> row = pd.Series({'booking_month': 'November', 'arrival_month': 'June'})
+            >>> DataPreparation._months_before_arrival(row)
+            7
+            >>> DataPreparation._months_before_arrival(pd.Series({'booking_month': 'March', 'arrival_month': 'March'}))
+            0
+            >>> DataPreparation._months_before_arrival(pd.Series({'booking_month': None, 'arrival_month': 'March'}))
+            <NA>
         """
 
         MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -154,8 +187,12 @@ class DataPreparation:
             float: The price value in SGD without currency prefix, rounded to 2 decimal places.
 
         Example:
-            convert_storey_range('USD$ 658.23') -> 888.62
-
+            >>> DataPreparation._convert_to_sgd('USD$ 100.00')
+            135.0
+            >>> DataPreparation._convert_to_sgd('SGD$ 492.98')
+            492.98
+            >>> pd.isna(DataPreparation._convert_to_sgd(None))
+            True
         """
         if pd.isna(price):
             return float('nan')
@@ -190,9 +227,18 @@ class DataPreparation:
                 for that month.
 
         Example:
-            days_stayed(row) -> 2
-            (where row['arrival_month'] = 'June', row['arrival_day'] = 25.0,
-            row['checkout_month'] = 'June' and row['checkout_day'] = -27.0)
+            >>> row = pd.Series({'arrival_month': 'June', 'arrival_day': 25.0,
+            ...                  'checkout_month': 'June', 'checkout_day': -27.0})
+            >>> DataPreparation._days_stayed(row)
+            2
+            >>> row = pd.Series({'arrival_month': 'December', 'arrival_day': 30.0,
+            ...                  'checkout_month': 'January', 'checkout_day': 2.0})
+            >>> DataPreparation._days_stayed(row)
+            3
+            >>> row = pd.Series({'arrival_month': 'June', 'arrival_day': 31.0,
+            ...                  'checkout_month': 'July', 'checkout_day': 2.0}) # 31 June does not exist
+            >>> DataPreparation._days_stayed(row) is None
+            True
         """
         months = ['January', 'February', 'March', 'April', 'May', 'June',
                 'July', 'August', 'September', 'October', 'November', 'December']
