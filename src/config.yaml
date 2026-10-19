@@ -1,0 +1,44 @@
+file_path: './data/mini_project_2_data.csv'
+target_column: no_show
+val_test_size: 0.2
+val_size: 0.5
+logreg_param_grid:
+  classifier__C: [0.001, 0.01, 0.1, 1.0, 10, 100, 1000]
+  classifier__penalty: ['l2', None]
+knn_param_grid:
+  classifier__n_neighbors: [3, 5, 7, 9, 11, 15]
+  classifier__weights: ['uniform', 'distance'] 
+dt_param_grid:
+  classifier__max_depth: [3, 5, 7, 10]
+  classifier__min_samples_split: [2, 5, 10]
+  classifier__min_samples_leaf: [1, 2, 4]
+cv: 5
+scoring: accuracy
+numerical_features:
+  - price
+  - days_stayed
+nominal_features:
+  - branch
+  - country
+  - first_time
+  - platform
+  - arrival_month
+ordinal_features:
+  - room
+  - num_adults
+  - num_children
+passthrough_features:
+  - lead_time_months
+room_categories:
+  - Single
+  - Queen
+  - King
+  - President Suite
+num_adults_categories:
+  - 1
+  - 2 
+num_children_categories:
+  - 0
+  - 1
+  - 2
+  - 3  
